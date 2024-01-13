@@ -1,0 +1,4 @@
+repository "FishNet-Demo@azaday@cloud"
+  path "/"
+    br "/main"
+    co "/main"
