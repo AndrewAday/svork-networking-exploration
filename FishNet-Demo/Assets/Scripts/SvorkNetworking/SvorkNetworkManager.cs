@@ -69,6 +69,7 @@ public class SvorkNetworkManager : MonoBehaviour
             if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) {
                 UnityEngine.Debug.Log($"Local IP: {ip.ToString()} | Port: {Port}");
                 LocalIP = ip.ToString();
+                break;
             }
         }
 
