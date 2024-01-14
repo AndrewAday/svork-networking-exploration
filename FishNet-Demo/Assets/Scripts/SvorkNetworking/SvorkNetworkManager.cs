@@ -78,6 +78,7 @@ public class SvorkNetworkManager : MonoBehaviour
 
         Receiver = gameObject.GetComponent<OSCReceiver>() ?? gameObject.AddComponent<OSCReceiver>();
         Receiver.LocalPort = Port;
+        // Receiver.LocalPort = 6450;
 
         // set up spawn listener
         string spawnAddress = "/svork/client/spawn";
@@ -117,8 +118,11 @@ public class SvorkNetworkManager : MonoBehaviour
             string senderNetworkName = message.Values[0].StringValue;
             int nobID = message.Values[1].IntValue;
 
-            // if nobID not registered, ignore.
-            if (!NetworkObjects.ContainsKey(nobID)) return;
+            // if nobID not registered, instantiate a new one.
+            if (!NetworkObjects.ContainsKey(nobID)) {
+                ReconcileSpawn(nobID);
+                return;
+            };
 
             // update transform
             GameObject go = NetworkObjects[nobID];
@@ -170,8 +174,19 @@ public class SvorkNetworkManager : MonoBehaviour
             },
             OSCValue.String(LocalIP), 
             OSCValue.Int(Port)
+            // OSCValue.Int(6450)
         );
 
+    }
+
+    void Update() 
+    {
+        // log receiver state
+        // if (Receiver.IsStarted) {
+        //     UnityEngine.Debug.Log($"Receiver is running on port {Receiver.LocalPort}");
+        // } else {
+        //     UnityEngine.Debug.Log($"Receiver is NOT running on port {Receiver.LocalPort}");
+        // }
     }
 
 #region NetworkUtils
@@ -181,6 +196,35 @@ public class SvorkNetworkManager : MonoBehaviour
         PERFORMERS = 1,  // all performers
         AUDIENCE = 2,  // all audience
         ALL_BUT_ME = 3,
+    }
+
+    // spawns a prefab that was spawned BEFORE this client connected
+    public void ReconcileSpawn(int nobID) {
+        SafeSend(
+            "svork/safe/getNobByID",
+            (OSCMessage message) => {
+                string prefabName = message.Values[0].StringValue;
+
+                // Create the prefab
+                GameObject prefab = Resources.Load<GameObject>(prefabName);
+                Assert.IsNotNull(prefab, $"Prefab {prefabName} not found in Resources");
+
+                GameObject go = Instantiate(prefab);
+                SvorkNetworkBehavior snb = go.GetComponent<SvorkNetworkBehavior>();
+                Assert.IsNotNull(snb, $"Prefab {prefabName} must have a SvorkNetworkBehavior component");
+
+                // set network properties
+                snb.SpawnerID = message.Values[1].StringValue;
+
+                snb.OwnerID = message.Values[2].StringValue;
+
+                snb.nobID = nobID;
+
+                // add to map
+                NetworkObjects.Add(nobID, go);
+            },
+            OSCValue.Int(nobID)
+        );
     }
 
     public GameObject Spawn(GameObject prefab) {
