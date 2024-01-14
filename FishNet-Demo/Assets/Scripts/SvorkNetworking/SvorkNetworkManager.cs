@@ -201,8 +201,10 @@ public class SvorkNetworkManager : MonoBehaviour
     // spawns a prefab that was spawned BEFORE this client connected
     public void ReconcileSpawn(int nobID) {
         SafeSend(
-            "svork/safe/getNobByID",
+            "/svork/safe/getNobByID",
             (OSCMessage message) => {
+                if (NetworkObjects.ContainsKey(nobID)) return;  // already registered
+
                 string prefabName = message.Values[0].StringValue;
 
                 // Create the prefab
@@ -223,6 +225,7 @@ public class SvorkNetworkManager : MonoBehaviour
                 // add to map
                 NetworkObjects.Add(nobID, go);
             },
+            OSCValue.String(MyNetworkName),
             OSCValue.Int(nobID)
         );
     }
