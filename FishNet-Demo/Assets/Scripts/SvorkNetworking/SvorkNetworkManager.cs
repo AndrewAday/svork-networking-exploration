@@ -28,16 +28,20 @@ public class SvorkNetworkManager : MonoBehaviour
 
     public GameObject PlayerPrefab;
 
-    private string LocalIP = "";
+    public string LocalIP = "";
 
     public string MyNetworkName = "";
 
 #region OSC Components 
-    private OSCTransmitter Transmitter;
-    private OSCReceiver Receiver;
+    public OSCTransmitter Transmitter;
+    public OSCReceiver Receiver;
 #endregion
 
     Dictionary<int, GameObject> NetworkObjects = new Dictionary<int, GameObject>();
+
+#region private
+    private ulong _safeSendCounter = 0;
+#endregion
 
     void Awake()
     {
@@ -67,7 +71,7 @@ public class SvorkNetworkManager : MonoBehaviour
         IPHostEntry host = Dns.GetHostEntry(Dns.GetHostName());
         foreach (IPAddress ip in host.AddressList) {
             if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) {
-                UnityEngine.Debug.Log($"Local IP: {ip.ToString()} | Port: {Port}");
+                UnityEngine.Debug.Log($"Local IP: {ip} | Port: {Port}");
                 LocalIP = ip.ToString();
                 break;
             }
@@ -198,6 +202,14 @@ public class SvorkNetworkManager : MonoBehaviour
         ALL_BUT_ME = 3,
     }
 
+    public string ServerIP() {
+        return Transmitter.RemoteHost;
+    }
+
+    public int ServerPort() {
+        return Transmitter.RemotePort;
+    }
+
     // spawns a prefab that was spawned BEFORE this client connected
     public void ReconcileSpawn(int nobID) {
         SafeSend(
@@ -230,30 +242,37 @@ public class SvorkNetworkManager : MonoBehaviour
         );
     }
 
-    public GameObject Spawn(GameObject prefab) {
-        // first instantiate the prefab locally (client authoritative)
-        GameObject go = Instantiate(prefab);
+    public void Spawn(GameObject prefab) {
+        // can't return gameobject because waiting for nextNobID callback.
+        // if game obj must be accessed immediately, switch nobID generation to client-side GUID instead
 
-        // check for SvorkNetworkBehavior
-        SvorkNetworkBehavior snb = go.GetComponent<SvorkNetworkBehavior>();
-        Assert.IsNotNull(snb, $"Prefab {prefab.name} must have a SvorkNetworkBehavior component");
-
-        // set network properties
-        snb.SpawnerID = MyNetworkName;
-        snb.OwnerID = MyNetworkName;
-        snb.nobID = -1;  // set to -1 to indicate not yet registered
 
         // request server for new nobID
         SafeSend(
             "/svork/safe/nextNobID",
             (OSCMessage message) => {
                 int newNobID = message.Values[0].IntValue;
+
+                // first instantiate the prefab locally (client authoritative)
+                GameObject go = Instantiate(prefab);
+
+                // check for SvorkNetworkBehavior
+                SvorkNetworkBehavior snb = go.GetComponent<SvorkNetworkBehavior>();
+                Assert.IsNotNull(snb, $"Prefab {prefab.name} must have a SvorkNetworkBehavior component");
+
+                // set network properties
+                snb.SpawnerID = MyNetworkName;
+                snb.OwnerID = MyNetworkName;
                 snb.nobID = newNobID;
+
                 // add to map
                 NetworkObjects.Add(newNobID, go);
 
                 UnityEngine.Debug.Log($"Assigned nobID {newNobID} to {go.name}");
 
+                // TODO: change this into relay / safeRelay
+                // send / safeSend for server only
+                // relay / safeRelay for sending to OTHER clients via server
                 // broadcast spawn to all other clients
                 Send(  // TODO: change to safe
                     "/svork/relay",  // TODO: change to safe eventually 
@@ -288,8 +307,6 @@ public class SvorkNetworkManager : MonoBehaviour
             // OSCValue.String(MyNetworkName),  // Spawner ID
             // OSCValue.String(prefab.name)
         // );
-
-        return go;
     }
 
     public void SendTransform(SvorkNetworkBehavior snb) {
@@ -316,12 +333,19 @@ public class SvorkNetworkManager : MonoBehaviour
         Transmitter.Send(message);
     }
 
+    private string _GenSafeSendUID() {
+        string id = MyNetworkName + _safeSendCounter;
+        _safeSendCounter++;
+        return id;
+    }
+
     // generic method for sending OSC messages and receiving a confirmation
     public void SafeSend(
         string oscAddress,
         UnityAction<OSCMessage> receiptCallback,
         params OSCValue[] values
     ) {
+        // todo: add client-safeSend-counter to message. functions as unique ID
         var message = new OSCMessage(oscAddress, values);
         StartCoroutine(
             _SafeSendImpl( message, oscAddress + "/received", receiptCallback)
